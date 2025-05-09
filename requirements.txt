@@ -1,0 +1,6 @@
+python 3.11.9
+opencv-python
+tensorflow
+mediapipe
+numpy
+keyboard

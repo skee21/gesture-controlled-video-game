@@ -1,4 +1,4 @@
-﻿# gesture-controlled-video-game
+﻿# Hand gesture controlled video game
 
 This program is mainly for car/racing games which only utilises WASD keys.
 
@@ -11,11 +11,11 @@ GitHub size limit didn't allow me to push the datasets, so get your own from kag
 The one I used was- https://www.kaggle.com/models/odayahmed/sign-language-models
 
 ## The main controls and gestures are- 
-'palm': 'w',        # Forward
-'fist': 's',        # Backward
-'right': 'd',       # Right (1 finger)
-'left': 'a',        # Left (2 fingers)
-'3_fingers': 'space' # Space (brake)
+- 'palm': 'w',        # Forward
+- 'fist': 's',        # Backward
+- 'right': 'd',       # Right (1 finger)
+- 'left': 'a',        # Left (2 fingers)
+- '3_fingers': 'space' # Space (brake)
 
 ## How to use a dataset: 
   - Download any hand sign recognition dataset(or use the one I provided above)

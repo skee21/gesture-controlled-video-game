@@ -7,6 +7,79 @@ import mediapipe as mp
 import keyboard
 import time
 import os
+import tkinter as tk
+from PIL import Image, ImageTk
+import threading
+import win32gui
+import win32con
+import win32api
+
+class OverlayWindow:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Gesture Overlay")
+        self.root.attributes("-topmost", True)  
+        self.root.attributes("-alpha", 0.7)     
+        self.root.overrideredirect(True)       
+        self.root.wm_attributes("-transparentcolor", "black")  
+        
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        self.width = 200
+        self.height = 150
+        self.root.geometry(f"{self.width}x{self.height}+{screen_width-self.width-10}+{screen_height-self.height-60}")
+        
+        self.canvas = tk.Canvas(self.root, bg="black", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        self.gesture_label = self.canvas.create_text(self.width//2, 40, text="No gesture", font=("Arial", 14, "bold"), fill="white")
+        self.key_label = self.canvas.create_text(self.width//2, self.height//2+20, text="", font=("Arial", 24, "bold"), fill="#00FF00")
+        
+        if os.name == 'nt':  
+            hwnd = win32gui.FindWindow(None, "Gesture Overlay")
+            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE,
+                                  win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) | 
+                                  win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT)
+        
+        close_button = tk.Button(self.root, text="×", command=self.root.destroy, 
+                                bg="red", fg="white", bd=0, font=("Arial", 10))
+        close_button.place(x=self.width-20, y=0, width=20, height=20)
+
+        self.canvas.bind("<Button-1>", self.start_move)
+        self.canvas.bind("<ButtonRelease-1>", self.stop_move)
+        self.canvas.bind("<B1-Motion>", self.on_motion)
+        
+    def start_move(self, event):
+        self.x = event.x
+        self.y = event.y
+        
+    def stop_move(self, event):
+        self.x = None
+        self.y = None
+        
+    def on_motion(self, event):
+        deltax = event.x - self.x
+        deltay = event.y - self.y
+        x = self.root.winfo_x() + deltax
+        y = self.root.winfo_y() + deltay
+        self.root.geometry(f"+{x}+{y}")
+    
+    def update_gesture_info(self, gesture_name, key):
+        gesture_display = {
+            'palm': 'PALM (Forward)',
+            'fist': 'FIST (Backward)',
+            'right': '1 FINGER (Right)',
+            'left': '2 FINGERS (Left)',
+            '3_fingers': '3 FINGERS (Brake)',
+            None: 'No Gesture'
+        }
+        
+        display_name = gesture_display.get(gesture_name, 'Unknown')
+        
+        self.canvas.itemconfig(self.gesture_label, text=display_name)
+        self.canvas.itemconfig(self.key_label, text=key.upper() if key else "")
+        self.root.update()
+
 
 class HandGestureController:
     def __init__(self):
@@ -26,10 +99,11 @@ class HandGestureController:
             'fist': 's',        # Backward
             'right': 'd',       # Right (1 finger)
             'left': 'a',        # Left (2 fingers)
-            '3_fingers': ' ' # Space (brake)
+            '3_fingers': ' '    # Space (brake)
         }
         
         self.current_key = None
+        self.current_gesture = None
         
         self.last_key_time = 0
         self.key_cooldown = 0.1  
@@ -37,6 +111,15 @@ class HandGestureController:
         # UI elements
         self.show_help = True
         self.help_timeout = time.time() + 10  # Show help for 10 seconds initially
+
+        self.overlay_thread = threading.Thread(target=self.create_overlay)
+        self.overlay_thread.daemon = True
+        self.overlay = None
+        self.overlay_thread.start()
+    
+    def create_overlay(self):
+        self.overlay = OverlayWindow()
+        self.overlay.root.mainloop()
     
     def create_model(self):
         model = Sequential([
@@ -125,12 +208,20 @@ class HandGestureController:
             key = self.gesture_map[gesture]
             keyboard.press(key)
             self.current_key = key
+            self.current_gesture = gesture
             self.last_key_time = current_time
+
+            if self.overlay:
+                self.overlay.update_gesture_info(gesture, key)
     
     def release_all_keys(self):
         for key in self.gesture_map.values():
             keyboard.release(key)
         self.current_key = None
+        self.current_gesture = None
+
+        if self.overlay:
+            self.overlay.update_gesture_info(None, "")
     
     def draw_ui(self, image, detected_gesture=None):
         h, w, _ = image.shape
@@ -157,7 +248,7 @@ class HandGestureController:
             cv2.putText(panel, name, (center_x - 80, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             cv2.putText(panel, key, (center_x - 60, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        cv2.putText(panel, "Press 'H' for Help | 'Q' to Quit", (w // 2 - 150, panel_height - 10),
+        cv2.putText(panel, "Press 'H' for Help | 'Q' to Quit | 'O' for Overlay Only", (w // 2 - 220, panel_height - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
 
         return np.vstack((image, panel))
@@ -184,6 +275,7 @@ class HandGestureController:
             "- Keep your hand in the camera's view",
             "- Make clear gestures with good lighting",
             "- Maintain distance from camera (1-2 feet)",
+            "- Press 'O' to hide camera and use overlay only",
             "",
             "Press 'H' to hide this help | 'Q' to quit"
         ]
@@ -205,7 +297,9 @@ class HandGestureController:
         
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cv2.resizeWindow(window_name, width, height + 120)  
+        cv2.resizeWindow(window_name, width, height + 120)
+        
+        overlay_only_mode = False
         
         while cap.isOpened():
             success, image = cap.read()
@@ -262,7 +356,11 @@ class HandGestureController:
                 else:
                     self.show_help = False
             
-            cv2.imshow(window_name, display_image)
+            if not overlay_only_mode:
+                cv2.imshow(window_name, display_image)
+            else:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) > 0:
+                    cv2.destroyWindow(window_name)
             
             key = cv2.waitKey(5) & 0xFF
             if key == ord('q'):
@@ -270,19 +368,34 @@ class HandGestureController:
             elif key == ord('h'):
                 self.show_help = not self.show_help
                 if self.show_help:
-                    self.help_timeout = time.time() + 10  
+                    self.help_timeout = time.time() + 10
+            elif key == ord('o'):
+                overlay_only_mode = not overlay_only_mode
+                if not overlay_only_mode:
+                    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                    cv2.resizeWindow(window_name, width, height + 120)
 
         self.release_all_keys()
         cap.release()
         cv2.destroyAllWindows()
+        
+        # Waits for overlay thread to finish
+        if self.overlay:
+            try:
+                self.overlay.root.destroy()
+            except:
+                pass
 
 def main():
     print("Initializing Hand Gesture Controller...")
     controller = HandGestureController()
     
     model_path = 'models/Hypermodel.h5'
-    print(f"Loading pre-trained model from {model_path}")
-    controller.model = tf.keras.models.load_model(model_path)
+    if os.path.exists(model_path):
+        print(f"Loading pre-trained model from {model_path}")
+        controller.model = tf.keras.models.load_model(model_path)
+    else:
+        print(f"Model file not found at {model_path}. Using default model.")
     
     print("\nStarting Hand Gesture Game Controller")
     print("\nControls:")
@@ -290,9 +403,10 @@ def main():
     print("  Closed Hand (Fist) → S (backward)")
     print("  One finger → D (right)")
     print("  Two fingers → A (left)")
-    print("  Five fingers → Space (brake/action)")
+    print("  Three fingers → Space (brake/action)")
     print("\nUI Controls:")
     print("  Press 'H' to toggle help overlay")
+    print("  Press 'O' to toggle overlay-only mode (hide camera window)")
     print("  Press 'Q' to quit")
     
     controller.run()

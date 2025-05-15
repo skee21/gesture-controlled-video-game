@@ -2,7 +2,7 @@
 
 This program is mainly for car/racing games which only utilises WASD keys.
 
-main_UI.py has some UI elements and a proper interface
+main_UI.py has some UI elements and a proper interface and an overlay. Press O to hide the camera window and only keep the overlay.
 
 main_noUI.py is simple camera window with a skeleton and no interface
 
